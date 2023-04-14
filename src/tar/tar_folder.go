@@ -12,7 +12,7 @@ import (
 
 const maxFileSize = 4 * 1024 * 1024 // 4MB
 
-func TarFile(src, dst string) {
+func TarFolder(src, dst string) {
 	dirPath := src
 	dir, err := os.Open(dirPath)
 	if err != nil {

@@ -5,6 +5,7 @@ go 1.20
 require (
 	github.com/go-sql-driver/mysql v1.7.0
 	github.com/go-xorm/xorm v0.7.9
+	github.com/google/martian v2.1.0+incompatible
 	xorm.io/core v0.7.3
 	xorm.io/xorm v1.3.2
 )

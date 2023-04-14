@@ -12,11 +12,11 @@ var engine *xorm.Engine
 type Ino uint64
 
 type ChunkFile struct {
-	Id     int64    `xorm:"pk bigserial"`
-	Inode  Ino      `xorm:"unique(chunk) notnull"`
-	Chunid uint32   `xorm:"unique(chunk) notnull"`
-	Files  []string `xorm:"blob notnull"`
-	Name   []byte   `xorm:"varbinary(255) notnull"`
+	Id      int64    `xorm:"pk bigserial"`
+	Inode   Ino      `xorm:"unique(chunk_file) notnull"`
+	ChunkId uint64   `xorm:"chunkid unique(chunk_file) notnull"`
+	Files   []string `xorm:"blob notnull"`
+	Name    []byte   `xorm:"varbinary(255) notnull"`
 }
 
 func Init() *xorm.Engine {
