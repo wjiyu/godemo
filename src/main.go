@@ -2,12 +2,20 @@ package main
 
 import (
 	"bufio"
-	"demo/src/testsql"
+	"demo/src/cmd"
+	"demo/src/utils"
 	"encoding/binary"
 	"flag"
 	"fmt"
+	"github.com/google/gops/agent"
+	"github.com/pyroscope-io/client/pyroscope"
+	"github.com/sirupsen/logrus"
+	"github.com/urfave/cli/v2"
 	"log"
 	"math"
+	"net/http"
+	"os"
+	"strconv"
 )
 
 const LIM = 41
@@ -381,37 +389,37 @@ func main() {
 	//}
 	//
 	//time.Sleep(1e9)
-	engine := testsql.Init()
-	//engine.Logger().SetLevel(core.LOG_DEBUG)
-
-	log.Println("delete chunk file: %v")
-	var f = testsql.ChunkFile{Inode: 45}
-	ok, err := engine.Get(&f)
-	if err != nil {
-		log.Println(err)
-	}
-	if !ok {
-		log.Println(ok)
-	}
-
-	//if _, err := engine.Delete(&testsql.ChunkFile{Inode: f.Inode}); err != nil {
+	//engine := testsql.Init()
+	////engine.Logger().SetLevel(core.LOG_DEBUG)
+	//
+	//log.Println("delete chunk file: %v")
+	//var f = testsql.ChunkFile{Inode: 45}
+	//ok, err := engine.Get(&f)
+	//if err != nil {
 	//	log.Println(err)
 	//}
-	if ok {
-		log.Println("update info")
-		f.Name = []byte("data-set.tar.gz")
-		count, err1 := engine.Cols("files", "name").Update(&f, &testsql.ChunkFile{Inode: f.Inode})
-		log.Println("count: %d", count)
-		if err1 != nil {
-			log.Println(err1)
-		}
-	} else {
-		log.Println("insert info")
-		_, err = engine.Insert(f)
-		if err != nil {
-			log.Println(err)
-		}
-	}
+	//if !ok {
+	//	log.Println(ok)
+	//}
+	//
+	////if _, err := engine.Delete(&testsql.ChunkFile{Inode: f.Inode}); err != nil {
+	////	log.Println(err)
+	////}
+	//if ok {
+	//	log.Println("update info")
+	//	f.Name = []byte("data-set.tar.gz")
+	//	count, err1 := engine.Cols("files", "name").Update(&f, &testsql.ChunkFile{Inode: f.Inode})
+	//	log.Println("count: %d", count)
+	//	if err1 != nil {
+	//		log.Println(err1)
+	//	}
+	//} else {
+	//	log.Println("insert info")
+	//	_, err = engine.Insert(f)
+	//	if err != nil {
+	//		log.Println(err)
+	//	}
+	//}
 
 	//
 	//engine.Sync2(new(testsql.ChunkFile))
@@ -450,8 +458,169 @@ func main() {
 
 	//tar.TarFolder("/mnt/jfs2/imagenet_4M", "/mnt/jfs2/archive.tar")
 
-	defer engine.Close()
+	//defer engine.Close()
+	var language string
+	app := &cli.App{
+		UseShortOptionHandling: true,
+		Commands: []*cli.Command{
+			cmd.CmdPack(),
+			{
+				Name:  "short",
+				Usage: "complete a task on the list",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{Name: "serve", Aliases: []string{"s"}},
+					&cli.BoolFlag{Name: "option", Aliases: []string{"o"}},
+					&cli.BoolFlag{Name: "message", Aliases: []string{"m"}},
+				},
+				Action: func(c *cli.Context) error {
+					log.Println("serve", c.Bool("serve"))
+					log.Println("option", c.Bool("option"))
+					log.Println("message", c.Bool("message"))
+					return nil
 
+				},
+			},
+			{
+				Name:     "add",
+				Category: "template",
+				Aliases:  []string{"a"},
+				Usage:    "add a task to the list",
+				Action: func(c *cli.Context) error {
+					log.Println("added task: ", c.Args().First())
+					return nil
+
+				},
+			},
+
+			{
+				Name:    "template",
+				Aliases: []string{"t"},
+				Usage:   "add a new template",
+				Subcommands: []*cli.Command{
+					{
+						Name:  "add",
+						Usage: "add a new template",
+						Action: func(c *cli.Context) error {
+							log.Println("new task template: ", c.Args().First())
+							return nil
+
+						},
+					},
+
+					{
+						Name:  "remove",
+						Usage: "remove an existing template",
+						Action: func(c *cli.Context) error {
+							fmt.Println("removed task template: ", c.Args().First())
+							return nil
+						},
+					},
+				},
+			},
+		},
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:        "lang",
+				Aliases:     []string{"language", "l"},
+				Value:       "english",
+				Usage:       "language for the greeting `FILE`",
+				Destination: &language,
+				EnvVars:     []string{"APP_LANG", "SYSTEM_LANG"},
+				FilePath:    "../lang.txt",
+				Required:    true,
+				DefaultText: "chinese",
+			},
+		},
+		Name:  "hello",
+		Usage: "hello world example!",
+		Action: func(c *cli.Context) error {
+			name := "world"
+			if c.NArg() > 0 {
+				name = c.Args().Get(0)
+			}
+
+			//if c.String("lang") == "english" {
+			if language == "english" {
+				log.Println("hello ", name)
+			} else {
+				log.Println("您好 ", name)
+			}
+
+			for i := 0; i < c.NArg(); i++ {
+				log.Println("%d: %s\n", i+1, c.Args().Get(i))
+
+			}
+			log.Println("hello world!")
+			return nil
+		},
+	}
+
+	err := app.Run(os.Args)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+}
+
+var logger = utils.GetLogger("wjy")
+
+// Check number of positional arguments, set logger level and setup agent if needed
+func setup(c *cli.Context, n int) {
+	if c.NArg() < n {
+		fmt.Printf("ERROR: This command requires at least %d arguments\n", n)
+		fmt.Printf("USAGE:\n   juicefs %s [command options] %s\n", c.Command.Name, c.Command.ArgsUsage)
+		os.Exit(1)
+	}
+
+	if c.Bool("trace") {
+		utils.SetLogLevel(logrus.TraceLevel)
+	} else if c.Bool("verbose") {
+		utils.SetLogLevel(logrus.DebugLevel)
+	} else if c.Bool("quiet") {
+		utils.SetLogLevel(logrus.WarnLevel)
+	} else {
+		utils.SetLogLevel(logrus.InfoLevel)
+	}
+	if c.Bool("no-color") {
+		utils.DisableLogColor()
+	}
+
+	if !c.Bool("no-agent") {
+		go func() {
+			for port := 6060; port < 6100; port++ {
+				_ = http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), nil)
+			}
+		}()
+		go func() {
+			for port := 6070; port < 6100; port++ {
+				_ = agent.Listen(agent.Options{Addr: fmt.Sprintf("127.0.0.1:%d", port)})
+			}
+		}()
+	}
+
+	if c.IsSet("pyroscope") {
+		tags := make(map[string]string)
+		appName := fmt.Sprintf("juicefs.%s", c.Command.Name)
+		if c.Command.Name == "mount" {
+			tags["mountpoint"] = c.Args().Get(1)
+		}
+		if hostname, err := os.Hostname(); err == nil {
+			tags["hostname"] = hostname
+		}
+		tags["pid"] = strconv.Itoa(os.Getpid())
+		tags["version"] = "v1"
+
+		if _, err := pyroscope.Start(pyroscope.Config{
+			ApplicationName: appName,
+			ServerAddress:   c.String("pyroscope"),
+			Logger:          logger,
+			Tags:            tags,
+			AuthToken:       os.Getenv("PYROSCOPE_AUTH_TOKEN"),
+			ProfileTypes:    pyroscope.DefaultProfileTypes,
+		}); err != nil {
+			logger.Errorf("start pyroscope agent: %v", err)
+		}
+	}
 }
 
 func generate(ch chan int) {
