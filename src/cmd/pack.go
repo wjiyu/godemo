@@ -16,6 +16,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 var logger = utils.GetLogger("wjy")
@@ -78,6 +80,11 @@ func setup(c *cli.Context, n int) {
 	}
 }
 
+const (
+	maxFileSize = 4 * 1024 * 1024 // 4MB
+	numWorkers  = 4               // number of workers in the thread pool
+)
+
 func CmdPack() *cli.Command {
 	return &cli.Command{
 		Name:      "pack",
@@ -125,135 +132,338 @@ func pack(ctx *cli.Context) error {
 }
 
 func packFolder(src, dst string, maxSize int) {
-	dirPath := src
-	dir, err := os.Open(dirPath)
-	if err != nil {
-		panic(err)
+	// create a wait group to wait for all workers to finish
+	var wg sync.WaitGroup
+
+	// create a channel to receive file paths
+	filePaths := make(chan string)
+
+	// create a channel to receive arrays of file paths
+	filePathArrays := make(chan []string)
+
+	// create a channel to signal when all workers have finished
+	done := make(chan bool)
+
+	// start the workers
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go worker(src, dst, filePathArrays, &wg)
 	}
-	defer dir.Close()
 
-	// Create a tar writer
-	tarPath := dst
-	tarFile, err := os.Create(tarPath)
-	if err != nil {
-		panic(err)
-	}
-	defer tarFile.Close()
+	// start the file path extractor
+	go extractFilePaths(src, filePaths)
 
-	tarWriter := tar.NewWriter(tarFile)
-	defer tarWriter.Close()
+	// create a slice to hold file paths
+	var filePathSlice []string
 
-	var maxPackSize int64 = int64(maxSize * 1024 * 1024) // 4MB
+	// create a variable to hold the total size of the files in the slice
+	var totalSize int64
 
-	var currentTarFileSize int64 = 0
-	var currentTarFileIndex int = 0
-	var currentTarFile *os.File = nil
-	defer func() {
-		if currentTarFile != nil {
-			currentTarFile.Close()
-		}
-	}()
+	// create a ticker to periodically check the size of the slice
+	ticker := time.NewTicker(time.Second)
 
-	var currentTarWriter *tar.Writer = nil
-
-	defer func() {
-		if currentTarWriter != nil {
-			currentTarWriter.Close()
-		}
-	}()
-
-	// Walk through the directory and add files to the tar archive
-	err = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+	// loop over the file paths received from the extractor
+	for filePath := range filePaths {
+		//log.Println("file path: %s", filePath)
+		// get the size of the file
+		fileInfo, err := os.Stat(filePath)
 		if err != nil {
-			logger.Error(err)
-			return err
+			log.Printf("Error getting file info for %s: %s", filePath, err)
+			continue
+		}
+		fileSize := fileInfo.Size()
+
+		// if adding the file would exceed the max size, send the slice to the workers
+		if totalSize+fileSize > int64(maxSize*1024*1024) {
+			// send the slice to the workers
+			filePathArrays <- filePathSlice
+
+			// create a new slice to hold file paths
+			filePathSlice = []string{filePath}
+
+			// reset the total size
+			totalSize = fileSize
+		} else {
+			// add the file path to the slice
+			filePathSlice = append(filePathSlice, filePath)
+
+			// add the file size to the total size
+			totalSize += fileSize
 		}
 
-		// Skip directories
-		if info.IsDir() {
+		// check if the ticker has ticked
+		select {
+		case <-ticker.C:
+			fmt.Println("tick: %v", ticker.C)
+			// do nothing
+		default:
+			fmt.Println("default")
+			// do nothing
+		}
+
+		log.Println("filePathSlice: %v", filePathSlice)
+	}
+
+	// send the final slice to the workers
+	filePathArrays <- filePathSlice
+
+	//log.Println("file: %v", filePathSlice)
+
+	// close the file path arrays channel
+	close(filePathArrays)
+
+	// wait for all workers to finish
+	go func() {
+		wg.Wait()
+		done <- true
+	}()
+
+	// wait for all workers to finish or for a timeout
+	select {
+	case <-done:
+		fmt.Println("All workers finished")
+	case <-time.After(60 * time.Second):
+		fmt.Println("Timeout waiting for workers to finish")
+	}
+}
+
+//func packFolder(src, dst string, maxSize int) {
+//	dirPath := src
+//	dir, err := os.Open(dirPath)
+//	if err != nil {
+//		panic(err)
+//	}
+//	defer dir.Close()
+//
+//	// Create a tar writer
+//	tarPath := dst
+//	tarFile, err := os.Create(tarPath)
+//	if err != nil {
+//		panic(err)
+//	}
+//	defer tarFile.Close()
+//
+//	tarWriter := tar.NewWriter(tarFile)
+//	defer tarWriter.Close()
+//
+//	var maxPackSize int64 = int64(maxSize * 1024 * 1024) // 4MB
+//
+//	var currentTarFileSize int64 = 0
+//	var currentTarFileIndex int = 0
+//	var currentTarFile *os.File = nil
+//	defer func() {
+//		if currentTarFile != nil {
+//			currentTarFile.Close()
+//		}
+//	}()
+//
+//	var currentTarWriter *tar.Writer = nil
+//
+//	defer func() {
+//		if currentTarWriter != nil {
+//			currentTarWriter.Close()
+//		}
+//	}()
+//
+//	// Walk through the directory and add files to the tar archive
+//	err = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+//		if err != nil {
+//			logger.Error(err)
+//			return err
+//		}
+//
+//		// Skip directories
+//		if info.IsDir() {
+//			return nil
+//		}
+//
+//		log.Println("path: %s", path)
+//
+//		// Open the file to be added to the archive
+//		file, err := os.Open(path)
+//		if err != nil {
+//			log.Println(err)
+//			return err
+//		}
+//		defer file.Close()
+//
+//		// Create a new tar header
+//		header := &tar.Header{
+//			Name: path,
+//			Mode: int64(info.Mode()),
+//			Size: info.Size(),
+//		}
+//
+//		currentTarFileSize += info.Size()
+//
+//		if currentTarFileSize > maxPackSize {
+//
+//			if tarWriter != nil {
+//				if err := tarWriter.Close(); err != nil {
+//					log.Println(err)
+//					return err
+//				}
+//				tarWriter = nil
+//			}
+//
+//			if currentTarWriter != nil {
+//				if err := currentTarWriter.Close(); err != nil {
+//					return err
+//				}
+//				currentTarWriter = nil
+//				currentTarFileIndex++
+//			}
+//
+//			currentTarFileSize = 0
+//
+//			currentTarFilePath := dst[:strings.Index(dst, ".tar")] + "_" + strconv.Itoa(currentTarFileIndex) + ".tar"
+//			currentTarFile, err = os.Create(currentTarFilePath)
+//			if err != nil {
+//				return err
+//			}
+//			currentTarWriter = tar.NewWriter(currentTarFile)
+//		}
+//
+//		if tarWriter != nil {
+//			//fmt.Println("tar: %v", tarWriter)
+//			// Write the header to the tar archive
+//			if err := tarWriter.WriteHeader(header); err != nil {
+//				log.Println(err)
+//				return err
+//			}
+//
+//			// Copy the file to the tar archive
+//			if _, err := io.Copy(tarWriter, file); err != nil {
+//				log.Println(err)
+//				return err
+//			}
+//		}
+//
+//		if currentTarWriter != nil {
+//			if err := currentTarWriter.WriteHeader(header); err != nil {
+//				log.Println(err)
+//				return err
+//			}
+//
+//			if _, err := io.Copy(currentTarWriter, file); err != nil {
+//				log.Println(err)
+//				return err
+//			}
+//		}
+//
+//		return nil
+//	})
+//
+//	if err != nil {
+//		log.Println(err)
+//	}
+//
+//	log.Println("Tar archives created successfully.")
+//}
+
+func extractFilePaths(dirPath string, filePaths chan<- string) {
+	// walk the directory tree
+	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			log.Printf("Error walking path %s: %s", path, err)
 			return nil
 		}
 
-		log.Println("path: %s", path)
-
-		// Open the file to be added to the archive
-		file, err := os.Open(path)
-		if err != nil {
-			log.Println(err)
-			return err
-		}
-		defer file.Close()
-
-		// Create a new tar header
-		header := &tar.Header{
-			Name: path,
-			Mode: int64(info.Mode()),
-			Size: info.Size(),
-		}
-
-		currentTarFileSize += info.Size()
-
-		if currentTarFileSize > maxPackSize {
-
-			if tarWriter != nil {
-				if err := tarWriter.Close(); err != nil {
-					log.Println(err)
-					return err
-				}
-				tarWriter = nil
-			}
-
-			if currentTarWriter != nil {
-				if err := currentTarWriter.Close(); err != nil {
-					return err
-				}
-				currentTarWriter = nil
-				currentTarFileIndex++
-			}
-
-			currentTarFileSize = 0
-
-			currentTarFilePath := dst[:strings.Index(dst, ".tar")] + "_" + strconv.Itoa(currentTarFileIndex) + ".tar"
-			currentTarFile, err = os.Create(currentTarFilePath)
-			if err != nil {
-				return err
-			}
-			currentTarWriter = tar.NewWriter(currentTarFile)
-		}
-
-		if tarWriter != nil {
-			//fmt.Println("tar: %v", tarWriter)
-			// Write the header to the tar archive
-			if err := tarWriter.WriteHeader(header); err != nil {
-				log.Println(err)
-				return err
-			}
-
-			// Copy the file to the tar archive
-			if _, err := io.Copy(tarWriter, file); err != nil {
-				log.Println(err)
-				return err
-			}
-		}
-
-		if currentTarWriter != nil {
-			if err := currentTarWriter.WriteHeader(header); err != nil {
-				log.Println(err)
-				return err
-			}
-
-			if _, err := io.Copy(currentTarWriter, file); err != nil {
-				log.Println(err)
-				return err
-			}
+		// if the path is a file, send it to the channel
+		if !info.IsDir() {
+			//log.Println("path: %v", path)
+			filePaths <- path
 		}
 
 		return nil
 	})
 
 	if err != nil {
-		log.Println(err)
+		log.Printf("Error walking directory %s: %s", dirPath, err)
 	}
 
-	log.Println("Tar archives created successfully.")
+	// close the file paths channel
+	close(filePaths)
+}
+
+func worker(src, dst string, filePathArrays <-chan []string, wg *sync.WaitGroup) {
+	// loop over the file path arrays received from the channel
+	for filePathArray := range filePathArrays {
+		fmt.Println("path array: %v", filePathArray)
+		// create a tar file
+		tarFile, err := os.CreateTemp(dst, "tar")
+		if err != nil {
+			log.Printf("Error creating tar file: %s", err)
+			continue
+		}
+
+		// create a new tar writer
+		tarWriter := tar.NewWriter(tarFile)
+
+		// loop over the file paths in the array
+		for _, filePath := range filePathArray {
+			// open the file
+			file, err := os.Open(filePath)
+			if err != nil {
+				log.Printf("Error opening file %s: %s", filePath, err)
+				continue
+			}
+
+			// get the file info
+			fileInfo, err := file.Stat()
+			if err != nil {
+				log.Printf("Error getting file info for %s: %s", filePath, err)
+				continue
+			}
+
+			// create a new header for the file
+			header := &tar.Header{
+				Name:    strings.TrimPrefix(filePath, filepath.Join(filepath.Dir(src), "/")),
+				Size:    fileInfo.Size(),
+				Mode:    int64(fileInfo.Mode()),
+				ModTime: fileInfo.ModTime(),
+			}
+
+			// write the header to the tar file
+			err = tarWriter.WriteHeader(header)
+			if err != nil {
+				log.Printf("Error writing header for %s: %s", filePath, err)
+				continue
+			}
+
+			// copy the file contents to the tar file
+			_, err = io.Copy(tarWriter, file)
+			if err != nil {
+				log.Printf("Error copying file %s to tar file: %s", filePath, err)
+				continue
+			}
+
+			// close the file
+			err = file.Close()
+			if err != nil {
+				log.Printf("Error closing file %s: %s", filePath, err)
+				continue
+			}
+		}
+
+		// close the tar writer
+		err = tarWriter.Close()
+		if err != nil {
+			log.Printf("Error closing tar writer: %s", err)
+			continue
+		}
+
+		// close the tar file
+		err = tarFile.Close()
+		if err != nil {
+			log.Printf("Error closing tar file: %s", err)
+			continue
+		}
+
+		// remove the file path array from the channel
+		<-filePathArrays
+	}
+
+	// signal that the worker has finished
+	wg.Done()
 }

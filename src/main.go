@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/tar"
 	"bufio"
 	"demo/src/cmd"
 	"demo/src/utils"
@@ -11,11 +12,15 @@ import (
 	"github.com/pyroscope-io/client/pyroscope"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
+	"io"
 	"log"
 	"math"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
+	"sync"
+	"time"
 )
 
 const LIM = 41
@@ -459,99 +464,114 @@ func main() {
 	//tar.TarFolder("/mnt/jfs2/imagenet_4M", "/mnt/jfs2/archive.tar")
 
 	//defer engine.Close()
-	var language string
+	//var language string
+	//app := &cli.App{
+	//	UseShortOptionHandling: true,
+	//	Commands: []*cli.Command{
+	//		cmd.CmdPack(),
+	//		{
+	//			Name:  "short",
+	//			Usage: "complete a task on the list",
+	//			Flags: []cli.Flag{
+	//				&cli.BoolFlag{Name: "serve", Aliases: []string{"s"}},
+	//				&cli.BoolFlag{Name: "option", Aliases: []string{"o"}},
+	//				&cli.BoolFlag{Name: "message", Aliases: []string{"m"}},
+	//			},
+	//			Action: func(c *cli.Context) error {
+	//				log.Println("serve", c.Bool("serve"))
+	//				log.Println("option", c.Bool("option"))
+	//				log.Println("message", c.Bool("message"))
+	//				return nil
+	//
+	//			},
+	//		},
+	//		{
+	//			Name:     "add",
+	//			Category: "template",
+	//			Aliases:  []string{"a"},
+	//			Usage:    "add a task to the list",
+	//			Action: func(c *cli.Context) error {
+	//				log.Println("added task: ", c.Args().First())
+	//				return nil
+	//
+	//			},
+	//		},
+	//
+	//		{
+	//			Name:    "template",
+	//			Aliases: []string{"t"},
+	//			Usage:   "add a new template",
+	//			Subcommands: []*cli.Command{
+	//				{
+	//					Name:  "add",
+	//					Usage: "add a new template",
+	//					Action: func(c *cli.Context) error {
+	//						log.Println("new task template: ", c.Args().First())
+	//						return nil
+	//
+	//					},
+	//				},
+	//
+	//				{
+	//					Name:  "remove",
+	//					Usage: "remove an existing template",
+	//					Action: func(c *cli.Context) error {
+	//						fmt.Println("removed task template: ", c.Args().First())
+	//						return nil
+	//					},
+	//				},
+	//			},
+	//		},
+	//	},
+	//	Flags: []cli.Flag{
+	//		&cli.StringFlag{
+	//			Name:        "lang",
+	//			Aliases:     []string{"language", "l"},
+	//			Value:       "english",
+	//			Usage:       "language for the greeting `FILE`",
+	//			Destination: &language,
+	//			EnvVars:     []string{"APP_LANG", "SYSTEM_LANG"},
+	//			FilePath:    "../lang.txt",
+	//			Required:    true,
+	//			DefaultText: "chinese",
+	//		},
+	//	},
+	//	Name:  "hello",
+	//	Usage: "hello world example!",
+	//	Action: func(c *cli.Context) error {
+	//		name := "world"
+	//		if c.NArg() > 0 {
+	//			name = c.Args().Get(0)
+	//		}
+	//
+	//		//if c.String("lang") == "english" {
+	//		if language == "english" {
+	//			log.Println("hello ", name)
+	//		} else {
+	//			log.Println("您好 ", name)
+	//		}
+	//
+	//		for i := 0; i < c.NArg(); i++ {
+	//			log.Println("%d: %s\n", i+1, c.Args().Get(i))
+	//
+	//		}
+	//		log.Println("hello world!")
+	//		return nil
+	//	},
+	//}
+
+	/************pack cmd*************/
+
 	app := &cli.App{
-		UseShortOptionHandling: true,
+		Name:                 "juicefs",
+		Usage:                "A POSIX file system built on Redis and object storage.",
+		Version:              "v1.0",
+		Copyright:            "Apache License 2.0",
+		HideHelpCommand:      true,
+		EnableBashCompletion: true,
+		//Flags:                globalFlags(),
 		Commands: []*cli.Command{
 			cmd.CmdPack(),
-			{
-				Name:  "short",
-				Usage: "complete a task on the list",
-				Flags: []cli.Flag{
-					&cli.BoolFlag{Name: "serve", Aliases: []string{"s"}},
-					&cli.BoolFlag{Name: "option", Aliases: []string{"o"}},
-					&cli.BoolFlag{Name: "message", Aliases: []string{"m"}},
-				},
-				Action: func(c *cli.Context) error {
-					log.Println("serve", c.Bool("serve"))
-					log.Println("option", c.Bool("option"))
-					log.Println("message", c.Bool("message"))
-					return nil
-
-				},
-			},
-			{
-				Name:     "add",
-				Category: "template",
-				Aliases:  []string{"a"},
-				Usage:    "add a task to the list",
-				Action: func(c *cli.Context) error {
-					log.Println("added task: ", c.Args().First())
-					return nil
-
-				},
-			},
-
-			{
-				Name:    "template",
-				Aliases: []string{"t"},
-				Usage:   "add a new template",
-				Subcommands: []*cli.Command{
-					{
-						Name:  "add",
-						Usage: "add a new template",
-						Action: func(c *cli.Context) error {
-							log.Println("new task template: ", c.Args().First())
-							return nil
-
-						},
-					},
-
-					{
-						Name:  "remove",
-						Usage: "remove an existing template",
-						Action: func(c *cli.Context) error {
-							fmt.Println("removed task template: ", c.Args().First())
-							return nil
-						},
-					},
-				},
-			},
-		},
-		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:        "lang",
-				Aliases:     []string{"language", "l"},
-				Value:       "english",
-				Usage:       "language for the greeting `FILE`",
-				Destination: &language,
-				EnvVars:     []string{"APP_LANG", "SYSTEM_LANG"},
-				FilePath:    "../lang.txt",
-				Required:    true,
-				DefaultText: "chinese",
-			},
-		},
-		Name:  "hello",
-		Usage: "hello world example!",
-		Action: func(c *cli.Context) error {
-			name := "world"
-			if c.NArg() > 0 {
-				name = c.Args().Get(0)
-			}
-
-			//if c.String("lang") == "english" {
-			if language == "english" {
-				log.Println("hello ", name)
-			} else {
-				log.Println("您好 ", name)
-			}
-
-			for i := 0; i < c.NArg(); i++ {
-				log.Println("%d: %s\n", i+1, c.Args().Get(i))
-
-			}
-			log.Println("hello world!")
-			return nil
 		},
 	}
 
@@ -560,6 +580,522 @@ func main() {
 		log.Fatal(err)
 	}
 
+	//listInfos, err := os.ReadDir("/mnt/jfs2")
+	//if err != nil {
+	//	log.Println(err)
+	//}
+	//
+	//for _, file := range listInfos {
+	//	log.Println(file.Name())
+	//}
+
+	//// Define the directory path to extract file names from
+	//dirPath := "/mnt/jfs/imagenet_4M"
+	//// create a wait group to wait for all workers to finish
+	//var wg sync.WaitGroup
+	//
+	//// create a channel to receive file paths
+	//filePaths := make(chan string)
+	//
+	//// create a channel to receive arrays of file paths
+	//filePathArrays := make(chan []string)
+	//
+	//// create a channel to signal when all workers have finished
+	//done := make(chan bool)
+	//
+	//// start the workers
+	//for i := 0; i < numWorkers; i++ {
+	//	wg.Add(1)
+	//	go worker(filePathArrays, &wg)
+	//}
+	//
+	//// start the file path extractor
+	//go extractFilePaths(dirPath, filePaths)
+	//
+	//// create a slice to hold file paths
+	//var filePathSlice []string
+	//
+	//// create a variable to hold the total size of the files in the slice
+	//var totalSize int64
+	//
+	//// create a ticker to periodically check the size of the slice
+	//ticker := time.NewTicker(time.Second)
+	//
+	//// loop over the file paths received from the extractor
+	//for filePath := range filePaths {
+	//	// get the size of the file
+	//	fileInfo, err := os.Stat(filePath)
+	//	if err != nil {
+	//		log.Printf("Error getting file info for %s: %s", filePath, err)
+	//		continue
+	//	}
+	//	fileSize := fileInfo.Size()
+	//
+	//	// if adding the file would exceed the max size, send the slice to the workers
+	//	if totalSize+fileSize > maxFileSize {
+	//		// send the slice to the workers
+	//		filePathArrays <- filePathSlice
+	//
+	//		// create a new slice to hold file paths
+	//		filePathSlice = []string{filePath}
+	//
+	//		// reset the total size
+	//		totalSize = fileSize
+	//	} else {
+	//		// add the file path to the slice
+	//		filePathSlice = append(filePathSlice, filePath)
+	//
+	//		// add the file size to the total size
+	//		totalSize += fileSize
+	//	}
+	//
+	//	// check if the ticker has ticked
+	//	select {
+	//	case <-ticker.C:
+	//		// do nothing
+	//	default:
+	//		// do nothing
+	//	}
+	//}
+	//
+	//// send the final slice to the workers
+	//filePathArrays <- filePathSlice
+	//
+	//// close the file path arrays channel
+	//close(filePathArrays)
+	//
+	//// wait for all workers to finish
+	//go func() {
+	//	wg.Wait()
+	//	done <- true
+	//}()
+	//cd
+	//// wait for all workers to finish or for a timeout
+	//select {
+	//case <-done:
+	//	fmt.Println("All workers finished")
+	//case <-time.After(10 * time.Second):
+	//	fmt.Println("Timeout waiting for workers to finish")
+	//}
+
+	//// create a wait group to wait for all workers to finish
+	//var wg sync.WaitGroup
+	//
+	//// create a channel to receive file paths
+	//filePaths := make(chan string)
+	//
+	//// create a pool of workers
+	//for i := 0; i < maxWorkers; i++ {
+	//	wg.Add(1)
+	//	go func() {
+	//		defer wg.Done()
+	//		for filePath := range filePaths {
+	//			// create tar file
+	//			err := createTar(filePath)
+	//			if err != nil {
+	//				log.Printf("error creating tar file for %s: %v", filePath, err)
+	//			}
+	//		}
+	//	}()
+	//}
+	//
+	//// get all file paths in the directory
+	////dirPath := "/c:/Users/wangjiyu/Desktop"
+	//filePathsList, err := getAllFilePaths(dirPath)
+	//if err != nil {
+	//	log.Fatalf("error getting file paths: %v", err)
+	//}
+	//
+	//// create a slice to hold file paths to be processed
+	//var filePathsSlice []string
+	//
+	//// iterate over all file paths and add them to the slice
+	//for _, filePath := range filePathsList {
+	//	// get file info
+	//	fileInfo, err := os.Stat(filePath)
+	//	if err != nil {
+	//		log.Printf("error getting file info for %s: %v", filePath, err)
+	//		continue
+	//	}
+	//
+	//	// check if file size is greater than maxFileSize
+	//	if fileInfo.Size() > maxFileSize {
+	//		log.Printf("file %s is too large to process", filePath)
+	//		continue
+	//	}
+	//
+	//	// add file path to slice
+	//	filePathsSlice = append(filePathsSlice, filePath)
+	//
+	//	// check if slice size is greater than maxFileSize
+	//	if getSliceSize(filePathsSlice) > maxFileSize {
+	//		// add slice to work queue
+	//		filePathsSliceCopy := make([]string, len(filePathsSlice))
+	//		copy(filePathsSliceCopy, filePathsSlice)
+	//		filePaths <- filePathsSliceCopy
+	//
+	//		// reset slice
+	//		filePathsSlice = nil
+	//	}
+	//}
+	//
+	//// add remaining files to work queue
+	//if len(filePathsSlice) > 0 {
+	//	filePathsSliceCopy := make([]string, len(filePathsSlice))
+	//	copy(filePathsSliceCopy, filePathsSlice)
+	//	filePaths <- filePathsSliceCopy
+	//}
+	//
+	//// close the channel to signal that all files have been added to the work queue
+	//close(filePaths)
+	//
+	//// wait for all workers to finish
+	//wg.Wait()
+
+	//var (
+	//	wg       sync.WaitGroup
+	//	queue    = make(chan []string, maxQueueLen)
+	//	fileSize int64
+	//)
+	//
+	//// Walk through the directory and add file names to the array
+	//fileList := make([]string, 0)
+	//err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+	//	if err != nil {
+	//		return err
+	//	}
+	//	if !info.IsDir() {
+	//		fileList = append(fileList, path)
+	//		atomic.AddInt64(&fileSize, info.Size())
+	//	}
+	//	return nil
+	//})
+	//if err != nil {
+	//	fmt.Println(err)
+	//	return
+	//}
+	//
+	//// Split the file list into chunks of maxFileSize
+	//chunks := make([][]string, 0)
+	//chunk := make([]string, 0)
+	//var chunkSize int64
+	//for _, file := range fileList {
+	//	info, err := os.Stat(file)
+	//	if err != nil {
+	//		fmt.Println(err)
+	//		return
+	//	}
+	//	if chunkSize+info.Size() > maxFileSize {
+	//		chunks = append(chunks, chunk)
+	//		chunk = make([]string, 0)
+	//		chunkSize = 0
+	//	}
+	//	chunk = append(chunk, file)
+	//	chunkSize += info.Size()
+	//}
+	//if len(chunk) > 0 {
+	//	chunks = append(chunks, chunk)
+	//}
+	//
+	//// Add chunks to the queue
+	//for _, chunk := range chunks {
+	//	queue <- chunk
+	//}
+	//
+	//// Process the queue using a worker pool
+	//for i := 0; i < 10; i++ {
+	//	wg.Add(1)
+	//	go func() {
+	//		defer wg.Done()
+	//		for chunk := range queue {
+	//			tarName := fmt.Sprintf("chunk_%d.tar", time.Now().UnixNano())
+	//			cmd := fmt.Sprintf("tar -cvf %s %s", tarName, filepath.Join(chunk...))
+	//			if err := exec.Command("bash", "-c", cmd).Run(); err != nil {
+	//				fmt.Println(err)
+	//				return
+	//			}
+	//		}
+	//	}()
+	//}
+	//
+	//wg.Wait()
+
+	//
+	//// Initialize an empty slice to hold file names
+	//var fileNames []string
+	//
+	//// Define a function to calculate the total size of a slice of files
+	//totalSize := func(files []string) int64 {
+	//	var total int64
+	//	for _, file := range files {
+	//		info, err := os.Stat(file)
+	//		if err != nil {
+	//			log.Fatal(err)
+	//		}
+	//		total += info.Size()
+	//	}
+	//	return total
+	//}
+	//
+	//// Define a function to process a slice of files
+	//processFiles := func(files []string) {
+	//	// Do something with the files, such as adding them to a work queue
+	//	fmt.Println("Processing files:", files)
+	//}
+	//
+	//// Walk through the directory and add file names to the slice
+	//err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+	//	if err != nil {
+	//		return err
+	//	}
+	//	if !info.IsDir() {
+	//		fileNames = append(fileNames, path)
+	//	}
+	//	return nil
+	//})
+	//if err != nil {
+	//	log.Fatal(err)
+	//}
+	//
+	//// Initialize an empty slice to hold a subset of file names
+	//var subset []string
+	//
+	//// Loop through the file names and add them to the subset slice until the total size reaches 4MB
+	//for _, fileName := range fileNames {
+	//	subset = append(subset, fileName)
+	//	if totalSize(subset) >= 4*1024*1024 {
+	//		// If the total size of the subset is 4MB or greater, process the subset and reset the subset slice
+	//		processFiles(subset)
+	//		subset = nil
+	//	}
+	//}
+	//
+	//// If there are any remaining files in the subset slice, process them as well
+	//if len(subset) > 0 {
+	//	processFiles(subset)
+	//}
+
+}
+
+const (
+	maxFileSize = 4 * 1024 * 1024 // 4MB
+	numWorkers  = 4               // number of workers in the thread pool
+)
+
+func extractFilePaths(dirPath string, filePaths chan<- string) {
+	// walk the directory tree
+	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			log.Printf("Error walking path %s: %s", path, err)
+			return nil
+		}
+
+		// if the path is a file, send it to the channel
+		if !info.IsDir() {
+			filePaths <- path
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		log.Printf("Error walking directory %s: %s", dirPath, err)
+	}
+
+	// close the file paths channel
+	close(filePaths)
+}
+
+func worker(filePathArrays <-chan []string, wg *sync.WaitGroup) {
+	// loop over the file path arrays received from the channel
+	for filePathArray := range filePathArrays {
+		// create a tar file
+		tarFile, err := os.CreateTemp("/mnt/jfs2", "tar")
+		if err != nil {
+			log.Printf("Error creating tar file: %s", err)
+			continue
+		}
+
+		// create a new tar writer
+		tarWriter := tar.NewWriter(tarFile)
+
+		// loop over the file paths in the array
+		for _, filePath := range filePathArray {
+			// open the file
+			file, err := os.Open(filePath)
+			if err != nil {
+				log.Printf("Error opening file %s: %s", filePath, err)
+				continue
+			}
+
+			// get the file info
+			fileInfo, err := file.Stat()
+			if err != nil {
+				log.Printf("Error getting file info for %s: %s", filePath, err)
+				continue
+			}
+
+			// create a new header for the file
+			header := &tar.Header{
+				Name:    fileInfo.Name(),
+				Size:    fileInfo.Size(),
+				Mode:    int64(fileInfo.Mode()),
+				ModTime: fileInfo.ModTime(),
+			}
+
+			// write the header to the tar file
+			err = tarWriter.WriteHeader(header)
+			if err != nil {
+				log.Printf("Error writing header for %s: %s", filePath, err)
+				continue
+			}
+
+			// copy the file contents to the tar file
+			_, err = io.Copy(tarWriter, file)
+			if err != nil {
+				log.Printf("Error copying file %s to tar file: %s", filePath, err)
+				continue
+			}
+
+			// close the file
+			err = file.Close()
+			if err != nil {
+				log.Printf("Error closing file %s: %s", filePath, err)
+				continue
+			}
+		}
+
+		// close the tar writer
+		err = tarWriter.Close()
+		if err != nil {
+			log.Printf("Error closing tar writer: %s", err)
+			continue
+		}
+
+		// close the tar file
+		err = tarFile.Close()
+		if err != nil {
+			log.Printf("Error closing tar file: %s", err)
+			continue
+		}
+
+		// remove the file path array from the channel
+		<-filePathArrays
+	}
+
+	// signal that the worker has finished
+	wg.Done()
+}
+
+// getAllFilePaths returns a list of all file paths in the directory
+func getAllFilePaths(dirPath string) ([]string, error) {
+	var filePaths []string
+	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			filePaths = append(filePaths, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return filePaths, nil
+}
+
+// getSliceSize returns the total size of all files in the slice
+func getSliceSize(filePaths []string) int64 {
+	var size int64
+	for _, filePath := range filePaths {
+		fileInfo, err := os.Stat(filePath)
+		if err != nil {
+			log.Printf("error getting file info for %s: %v", filePath, err)
+			continue
+		}
+		size += fileInfo.Size()
+	}
+	return size
+}
+
+// createTar creates a tar file for the given file paths
+func createTar(filePaths ...string) error {
+	// create tar file
+	tarFilePath := fmt.Sprintf("%s.tar", time.Now().Format("2006-01-02_15-04-05"))
+	tarFile, err := os.Create(tarFilePath)
+	if err != nil {
+		return err
+	}
+	defer tarFile.Close()
+
+	// create tar writer
+	tarWriter := tar.NewWriter(tarFile)
+	defer tarWriter.Close()
+
+	// add files to tar
+	for _, filePath := range filePaths {
+		file, err := os.Open(filePath)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+
+		fileInfo, err := file.Stat()
+		if err != nil {
+			return err
+		}
+
+		header := &tar.Header{
+			Name:    fileInfo.Name(),
+			Size:    fileInfo.Size(),
+			Mode:    int64(fileInfo.Mode()),
+			ModTime: fileInfo.ModTime(),
+		}
+
+		err = tarWriter.WriteHeader(header)
+		if err != nil {
+			return err
+		}
+
+		_, err = io.Copy(tarWriter, file)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func globalFlags() []cli.Flag {
+	return []cli.Flag{
+		&cli.BoolFlag{
+			Name:    "verbose",
+			Aliases: []string{"debug", "v"},
+			Usage:   "enable debug log",
+		},
+		&cli.BoolFlag{
+			Name:    "quiet",
+			Aliases: []string{"q"},
+			Usage:   "show warning and errors only",
+		},
+		&cli.BoolFlag{
+			Name:  "trace",
+			Usage: "enable trace log",
+		},
+		&cli.BoolFlag{
+			Name:  "no-agent",
+			Usage: "disable pprof (:6060) and gops (:6070) agent",
+		},
+		&cli.StringFlag{
+			Name:  "pyroscope",
+			Usage: "pyroscope address",
+		},
+		&cli.BoolFlag{
+			Name:  "no-color",
+			Usage: "disable colors",
+		},
+	}
 }
 
 var logger = utils.GetLogger("wjy")
