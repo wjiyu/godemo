@@ -19,7 +19,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -472,7 +471,7 @@ func main() {
 	//time.Sleep(1e9)
 
 	//log.Println(filepath.Glob("/mnt/jfs/.*.JPEG"))
-	filePath := "/mnt/jfs2/pack/imagenet_4M_1"
+	filePath := "/mnt/jfs2/pack/imagenet_4M"
 	if filePath == "" {
 		filePath, err = os.Getwd()
 		if err != nil {
@@ -483,6 +482,16 @@ func main() {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		log.Println(err)
+	}
+
+	var datasetName string
+	if os.IsNotExist(err) {
+		datasetName = filepath.Base(filePath)
+		filePath = filepath.Dir(filePath)
+		fileInfo, err = os.Stat(filePath)
+		if err != nil {
+			log.Println(err)
+		}
 	}
 
 	stat, ok := fileInfo.Sys().(*syscall.Stat_t)
@@ -499,6 +508,9 @@ func main() {
 	if fileInfo.IsDir() {
 		s = engine.Table(&testsql.Edge{})
 		s = s.Join("INNER", &testsql.ChunkFile{}, "jfs_edge.inode = jfs_chunk_file.inode")
+		if datasetName != "" {
+			s = s.Where(" jfs_edge.name like ?", datasetName+"%")
+		}
 		if err := s.Find(&nodes, &testsql.Edge{Parent: testsql.Ino(inode)}); err != nil {
 			log.Println(err)
 		}
@@ -520,7 +532,8 @@ func main() {
 		s = s.Limit(limit, 0)
 	}
 
-	log.Printf("nodes: %v", nodes)
+	//log.Printf("nodes: %v", nodes)
+
 	//var entries *[]*Entry
 	//entries := []*Entry{
 	//	{
@@ -537,13 +550,23 @@ func main() {
 
 	var fileList []string
 	for _, n := range nodes {
-		log.Printf("nodes: %v", n.Name)
+		//log.Printf("nodes: %v", n.Name)
 		if len(n.Name) == 0 {
 			logger.Errorf("Corrupt entry with empty name: inode %d parent %d", inode)
 			continue
 		}
 
-		fileList = append(fileList, n.Files...)
+		index := strings.LastIndex(string(n.Name), "_")
+		if index < 0 {
+			log.Println(index)
+			continue
+		}
+
+		subName := string(n.Name)[:index]
+
+		if datasetName == subName {
+			fileList = append(fileList, n.Files...)
+		}
 
 		//if n.Files != nil && len(n.Files) > 0 {
 		//	for _, file := range n.Files {
@@ -578,9 +601,9 @@ func main() {
 		//entries = append(entries, entry)
 
 	}
-	log.Println(fileList)
-
-	displayFileTree(fileList)
+	//log.Println(fileList)
+	//
+	//displayFileTree(fileList)
 
 	//tree := createTree(fileList)
 	//printTree(tree, "")
@@ -829,6 +852,7 @@ func main() {
 		//Flags:                globalFlags(),
 		Commands: []*cli.Command{
 			cmd.CmdPack(),
+			cmd.CmdView(),
 		},
 	}
 
@@ -1241,31 +1265,62 @@ func main() {
 	//
 	//readdirtree(dir, 0)
 
-	sort.Slice(fileList, func(i, j int) bool {
-		dirI := filepath.Dir(fileList[i])
-		dirJ := filepath.Dir(fileList[j])
-		return dirI < dirJ
-	})
+	//sort file list
+	//sort.Slice(fileList, func(i, j int) bool {
+	//	dirI := filepath.Dir(fileList[i])
+	//	dirJ := filepath.Dir(fileList[j])
+	//	return dirI < dirJ
+	//})
+	//
+	//// 输出排序后的结果
+	//for _, filePath := range fileList {
+	//	fmt.Println(filePath)
+	//}
+	//
+	//root := &Node1{}
+	//for _, filePath := range fileList {
+	//	parts := strings.Split(filePath, "/")
+	//	curr := root
+	//	for _, part := range parts {
+	//		child := getChild(curr, part)
+	//		curr = child
+	//	}
+	//}
+	//printTree(root, 0)
+	//
+	//rootNode := &utils.FileNode{}
+	//rootNode.MTree("/mnt/jfs")
+	//rootNode.ShowTree("")
+	//
+	//node := &utils.FileNode{}
+	//node.LTree(fileList)
+	//node.ShowTree("")
 
-	// 输出排序后的结果
-	for _, filePath := range fileList {
-		fmt.Println(filePath)
-	}
-
-	root := &Node1{}
-	for _, filePath := range fileList {
-		parts := strings.Split(filePath, "/")
-		curr := root
-		for _, part := range parts {
-			child := getChild(curr, part)
-			curr = child
-		}
-	}
-	printTree(root, 0)
-
-	rootNode := &utils.FileNode{}
-	rootNode.MTree("/mnt/jfs")
-	rootNode.ShowTree("")
+	//file, err := os.Open("/mnt/jfs2/pack/imagenet_4M_0")
+	//if err != nil {
+	//	fmt.Println(err)
+	//	return
+	//}
+	//defer file.Close()
+	//tarReader := tar.NewReader(file)
+	//for {
+	//	header, err := tarReader.Next()
+	//	if err != nil {
+	//		if err == io.EOF {
+	//			break
+	//		}
+	//		fmt.Println(err)
+	//		return
+	//	}
+	//	if header.Typeflag == tar.TypeReg {
+	//		stat := header.FileInfo()
+	//		// Get the inode number of the file
+	//		inode := stat.Sys().(*syscall.Stat_t).Ino
+	//		// Do something with the inode number
+	//		fmt.Printf("%s: %d\n", header.Name, inode)
+	//	}
+	//
+	//}
 
 }
 

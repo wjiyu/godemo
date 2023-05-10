@@ -97,5 +97,56 @@ func (node *FileNode) MTree(path string) error {
 			}
 		}
 	}
+
 	return nil
+}
+
+func (node *FileNode) LTree(paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	node.Children = make([]*FileNode, 0, len(paths))
+	//var pre *FileNode = nil
+	for _, path := range paths {
+		names := strings.Split(path, "/")
+		current := node
+		for index, name := range names {
+			child := current.GetChild(name, index != len(names)-1)
+			current = child
+			//if pre != nil {
+			//	pre.Right = child
+			//}
+			//pre = child
+		}
+	}
+	return nil
+}
+
+func (node *FileNode) GetChild(name string, isDir bool) *FileNode {
+	for _, child := range node.Children {
+		if child.FileName == name {
+			return child
+		}
+	}
+
+	var pre *FileNode = nil
+	if len(node.Children) > 0 {
+		pre = node.Children[len(node.Children)-1]
+	}
+
+	childFile := &FileNode{
+		Level:    node.Level + 1,
+		Children: nil,
+		FileName: name,
+		Parent:   node,
+		Left:     pre,
+		IsDir:    isDir,
+	}
+
+	if pre != nil {
+		pre.Right = childFile
+	}
+
+	node.Children = append(node.Children, childFile)
+	return childFile
 }
